@@ -2,7 +2,7 @@ extern crate xml;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufReader, Error};
+use std::io::{BufReader};
 use std::fmt::Write;
 use structopt::StructOpt;
 use xml::reader::{EventReader, XmlEvent, ParserConfig};
@@ -83,15 +83,21 @@ struct FnParam
     par_name: String,
     par_type: String,
     par_refid: Option<String>,
+    par_desc: String,
+    par_brief: String,
 }
 
 #[derive(Clone)]
 struct StructureInfo
 {
     str_name: String,
+    str_brief: String,
+    str_description: String,
     str_members: Vec<FnParam>,
 }
 
+// Information for a function.
+// Pretty much everything else is hung off this
 struct FunctionInfo
 {
     fn_type: String,
@@ -99,8 +105,9 @@ struct FunctionInfo
     fn_argstring: String,
     fn_brief: String,
     fn_detail: String,
+    fn_returnval: String,
     fn_args: Vec<FnParam>,
-    fn_refids: Vec<String>, // refids used in the function
+    fn_refids: Vec<String>, // refids for structs used in the function
 }
 
 impl FunctionInfo {
@@ -111,13 +118,14 @@ impl FunctionInfo {
             fn_argstring: String::new(),
             fn_brief: String::new(),
             fn_detail: String::new(),
+            fn_returnval: String::new(),
             fn_args: Vec::<FnParam>::new(),
             fn_refids: Vec::<String>::new(),
         }
     }
 }
 
-
+// Does what it says on the tin
 fn get_attr(e: &XmlEvent, attrname: &str) -> String
 {
     match e {
@@ -133,55 +141,24 @@ fn get_attr(e: &XmlEvent, attrname: &str) -> String
     return String::new();
 }
 
-fn collect_ref(parser: &mut EventReader<BufReader<File>>) -> String
+// This is the main text-collecting routine. It should parse as many XML options as possible
+// It returns the string itself (formatted) and a refid for the object if appropriate.
+fn collect_text_and_refid(parser: &mut EventReader<BufReader<File>>) -> (String, Option<String>)
 {
     let mut text = String::new();
+    let mut refid = None;
+    let mut retval = String::new();
 
     loop {
         let er = parser.next();
         match er {
             Ok(e) => {
                 match &e {
-                    XmlEvent::StartElement {name, attributes, ..} => {
-                        println!("REF element: {}: {:?}", name, attributes);
-                        match name.to_string().as_str() {
-                            "declname" => {
-                                // THIS NEVER HAPPENS
-                            }
-                            _ => {}
-                        }
-                    }
-                    XmlEvent::Characters(s) => {
-//                        println!("REF characters: {}", s);
-                        text += s;
-                    }
-                    XmlEvent::EndElement {..} => {
-                        return text;
-                    }
-                    _ => {}
-                }
-            }
-            Err(_s) => {}
-        }
-    }
-}
-
-
-fn collect_text(parser: &mut EventReader<BufReader<File>>, structures: &mut HashMap<String, StructureInfo>) -> String
-{
-    let mut text = String::new();
-    loop {
-        let er = parser.next();
-        match er {
-            Ok(e) => {
-                match &e {
-//                    XmlEvent::StartElement {name, attributes, ..} => {
                     XmlEvent::StartElement {name, ..} => {
-//                        println!("text element: {} {:?}", name, attributes);
                         match name.to_string().as_str() {
                             "para" => {
                                 text += "\n";
-                                text += collect_text(parser, structures).as_str();
+                                text += collect_text(parser).as_str();
                             }
                             "sp" => {
                                 text += " ";
@@ -190,94 +167,61 @@ fn collect_text(parser: &mut EventReader<BufReader<File>>, structures: &mut Hash
                             }
                             "highlight" | "emphasis" => {
                                 text += "\\fB";
-                                text += collect_text(parser, structures).as_str();
+                                text += collect_text(parser).as_str();
                                 text += "\\fR";
                             }
-                            "parametername" => {
+                            "parametername" => { // TODO formatting
+                                text += collect_text(parser).as_str();
+                            }
+                            "parameterdescrption" => { // TODO formatting
+                                text += collect_text(parser).as_str();
                             }
                             "computeroutput" => {
                                 text += "\n.nf\n";
-                                text += collect_text(parser, structures).as_str();
+                                text += collect_text(parser).as_str();
                                 text += "\n.fi\n";
                             }
                             "ref" => {
-                                let refid = get_attr(&e, "refid");
-                                let kind = get_attr(&e, "kindref");
-                                let tmp = collect_ref(parser);
-                                text += &tmp;
-
-                                // If it's a struct, add it to the list to collect
-                                // TODO: Check if this also includes enums
-                                if kind == "compound" {
-                                    match structures.get(&refid) {
-                                        Some(_) => {} // It's already in here
-                                        None => {
-                                            let new_struct = StructureInfo {str_name: tmp.clone(), str_members: Vec::<FnParam>::new()};
-                                            structures.insert(refid, new_struct);
-                                        }
-                                    }
+                                refid = Some(get_attr(&e, "refid"));
+                                text += collect_text(parser).as_str();
+                            }
+                            "itemizedlist" => {
+                                text += collect_text(parser).as_str();
+                                text += ".PP\n"; // CC: CHECK
+                            }
+                            "listitem" => {
+                                text += " * ";
+                                text += collect_text(parser).as_str();
+                                text += ".BR\n"; // CC: CHECK
+                            }
+                            "note" => {
+                                text += collect_text(parser).as_str();
+                                text += ".BR\n"; // CC: CHECK
+                            }
+                            "simplesect" => {
+                                let kind = get_attr(&e, "kind");
+                                if kind == "return" {
+                                    retval = collect_text(parser);
+                                } else {
+                                    text += collect_text(parser).as_str();
                                 }
                             }
 
-                            _ => {} // TODO MORE!
+                            _ => {} // TODO MORE! - lists(check), retvals
                         }
                     }
                     XmlEvent::Characters(s) => {
                         text += s;
                     }
                     XmlEvent::EndElement {..} => {
-                        return text;
-                    }
-                    _ => {}
-                }
-            }
-            Err(e) => {
-                println!("Error:{}", e);
-                return text;
-            }
-        }
-    }
-}
-
-// A stripped-down version of collect_text that also returns the refid
-fn collect_param_text(parser: &mut EventReader<BufReader<File>>, structures: &mut HashMap<String, StructureInfo>) -> (String, String)
-{
-    let mut text = String::new();
-    let mut refid = String::new();
-    loop {
-        let er = parser.next();
-        match er {
-            Ok(e) => {
-                match &e {
-                    XmlEvent::StartElement {name, ..} => {
-                        match name.to_string().as_str() {
-                            "ref" => {
-                                refid = get_attr(&e, "refid");
-                                let kind = get_attr(&e, "kindref");
-                                let tmp = collect_ref(parser);
-                                text += &tmp;
-
-                                // If it's a struct, add it to the list to collect
-                                // TODO: Check if this also includes enums
-                                if kind == "compound" {
-                                    match structures.get(&refid) {
-                                        Some(_) => {} // It's already in here
-                                        None => {
-                                            let new_struct = StructureInfo {str_name: tmp.clone(), str_members: Vec::<FnParam>::new()};
-                                            structures.insert(refid.clone(), new_struct);
-                                        }
-                                    }
-                                }
-                            }
-
-                            _ => {} // TODO MORE!
+                        if retval != "" {
+                            text += ".SH\n";
+                            text += "RETURN VALUES\n";
+                            text += retval.as_str();
+                            text += "\n";
+                            text += ".PP\n";
                         }
-                    }
-                    XmlEvent::Characters(s) => {
-                        text += s;
-                    }
-                    XmlEvent::EndElement {..} => {
-                        return (text, refid);
+                        return (text.trim().to_string(), refid);
                     }
                     _ => {}
                 }
@@ -290,23 +234,12 @@ fn collect_param_text(parser: &mut EventReader<BufReader<File>>, structures: &mu
     }
 }
 
-
-fn TEST_print_function(f: &FunctionInfo)
+// Call collect_text_and_refid() and throw away the refid
+fn collect_text(parser: &mut EventReader<BufReader<File>>) -> String
 {
-    println!("FUNCTION {} {} {}", f.fn_type, f.fn_name, f.fn_argstring);
-    for i in &f.fn_args {
-        match &i.par_refid {
-            Some(r) =>
-                println!("  PARAM: {} {} ({})", i.par_type, i.par_name, r),
-            None =>
-                println!("  PARAM: {} {}", i.par_type, i.par_name),
-        }
-    }
-    println!("BRIEF: {}", f.fn_brief);
-    println!("DETAIL: {}", f.fn_detail);
-    println!("----------------------");
+    let (text, _refid) = collect_text_and_refid(parser);
+    return text;
 }
-
 
 fn collect_function_param(parser: &mut EventReader<BufReader<File>>,
                           structures: &mut HashMap<String, StructureInfo>) -> FnParam
@@ -321,18 +254,31 @@ fn collect_function_param(parser: &mut EventReader<BufReader<File>>,
             Ok(e) => {
                 match &e {
                     XmlEvent::StartElement {name, ..} => {
-                        let (tmp, refid) = collect_param_text(parser, structures);
+                        let (tmp, refid) = collect_text_and_refid(parser);
+                        match &refid {
+                            Some(r) => {
+                                match structures.get(r) {
+                                    Some(_) => {} // It's already in here
+                                    None => {
+                                        let new_struct = StructureInfo {str_name: tmp.clone(), str_brief: String::new(), str_description: String::new(), str_members: Vec::<FnParam>::new()};
+                                        structures.insert(r.clone(), new_struct);
+                                    }
+                                }
+                            },
+                            None => {}
+                        }
 
                         if name.to_string() == "type" {
                             par_type = tmp.clone();
-                            par_refid = Some(refid);
+                            par_refid = refid.clone();
                         }
                         if name.to_string() == "declname" {
                             par_name = tmp.clone();
                         }
                     }
+
                     XmlEvent::EndElement {..} => {
-                        return FnParam{par_name, par_type, par_refid};
+                        return FnParam{par_name, par_type, par_refid, par_desc: String::new(), par_brief: String::new()};
                     }
                     _e => {
                     }
@@ -340,7 +286,7 @@ fn collect_function_param(parser: &mut EventReader<BufReader<File>>,
             }
             Err(e) => {
                 println!("Error:{}", e);
-                return FnParam{par_name, par_type, par_refid: None}; //CC: OK ???
+                return FnParam{par_name, par_type, par_refid: None, par_desc: String::new(), par_brief: String::new()};
             }
         }
     }
@@ -358,20 +304,18 @@ fn collect_function_info(parser: &mut EventReader<BufReader<File>>,
             Ok(e) => {
                 match &e {
                     XmlEvent::StartElement {name, ..} => {
-//                        println!("Function element: {} {:?}", name, attributes);
-
                         match name.to_string().as_str() {
                             "type" => {
-                                function.fn_type = collect_text(parser, structures);
+                                function.fn_type = collect_text(parser);
                             },
                             "definition" =>  {
-                                let _fntext = collect_text(parser, structures).as_str().to_string();
+                                let _fntext = collect_text(parser).as_str().to_string();
                             }
                             "argsstring" => {
-                                function.fn_argstring = collect_text(parser, structures);
+                                function.fn_argstring = collect_text(parser);
                             }
                             "name" => {
-                                function.fn_name = collect_text(parser, structures);
+                                function.fn_name = collect_text(parser);
                             }
                             "param" => {
                                 let param = collect_function_param(parser, structures);
@@ -384,19 +328,22 @@ fn collect_function_info(parser: &mut EventReader<BufReader<File>>,
                                 function.fn_args.push(param);
                             }
                             "briefdescription" => {
-                                function.fn_brief = collect_text(parser, structures);
+                                function.fn_brief = collect_text(parser);
                             }
                             "detaileddescription" => {
-                                function.fn_detail = collect_text(parser, structures);
+//                                let parser_clone = parser.Position();
+                                function.fn_detail = collect_text(parser);
+                                // TODO: "simplesect" in here has return values
+                                // Can I clone parser and get it????
+//                                function.fn_returnval = collect_retval(parser_clone);
                             }
                             _ => {
                                 // Not used,. but still need to consume it
-                                let _fntext = collect_text(parser, structures);
+                                let _fntext = collect_text(parser);
                             }
                         }
                     }
                     XmlEvent::Characters(_s) => {
-                        //println!("Function Chars: {}", s); // CC: This is the actual text
                     }
                     XmlEvent::EndElement {..} => {
                         functions.push(function);
@@ -410,7 +357,7 @@ fn collect_function_info(parser: &mut EventReader<BufReader<File>>,
                 return;
             }
         }
-   }
+    }
 }
 
 fn read_file(parser: &mut EventReader<BufReader<File>>,
@@ -424,8 +371,8 @@ fn read_file(parser: &mut EventReader<BufReader<File>>,
             Ok(e) => {
                 match &e {
                     XmlEvent::StartElement {name, ..} => {
-//                        println!("Start: {} {:?}", name, attributes);
                         if name.to_string() == "memberdef" && get_attr(&e, "kind") == "function" {
+
                             // Do function stuff
                             // go down the tree collecting info until we read EndElement
                             collect_function_info(parser,
@@ -435,14 +382,13 @@ fn read_file(parser: &mut EventReader<BufReader<File>>,
 
                         // TODO header-general info
                         if name.to_string() == "compounddef" && get_attr(&e, "kind") == "file" {
-                            let header_text = collect_text(parser, structures);
+                            let header_text = collect_text(parser);
                             println!("HEADER TEXT: {}", header_text);
                         }
                     },
                     XmlEvent::EndElement {..} => {
                     },
                     XmlEvent::Characters(_s) => {
-                        // println!("Chars: {}", s);
                     },
                     XmlEvent::EndDocument => return,
                     _ => {}
@@ -456,24 +402,114 @@ fn read_file(parser: &mut EventReader<BufReader<File>>,
     }
 }
 
-// Read a single structure file
-fn read_structure_file(parser: &mut EventReader<BufReader<File>>,
-                       sinfo: &mut StructureInfo) -> Result<u32, Error>
+// Read a single structure member from a structure file
+fn read_structure_member(parser: &mut EventReader<BufReader<File>>) -> Result<FnParam, xml::reader::Error>
 {
-    // TODO!
+    let mut par_name = String::new();
+    let mut par_type = String::new();
+    let mut par_desc = String::new();
+    let mut par_brief = String::new();
+    let mut par_args = String::new();
 
-    return Ok(0);
+    loop {
+        let er = parser.next();
+        match er {
+            Ok(e) => {
+                match &e {
+                    XmlEvent::StartElement {name, ..} => {
+//                        println!("MEMBER READ: start name: {}", name);
+                        match name.to_string().as_str() {
+                            "name" => {
+                                par_name = collect_text(parser);
+                            }
+                            "type" => {
+                                par_type = collect_text(parser);
+                            }
+                            "argsstring" => {
+                                par_args = collect_text(parser);
+                            }
+                            "detaileddescription" => {
+                                par_desc = collect_text(parser);
+                            }
+                            "briefdescription" => {
+                                par_brief = collect_text(parser);
+                            }
+                            _ => {
+                                // Not used but still needs to be collected
+                                let _fntext = collect_text(parser);
+                            }
+                        }
+                    }
+                    XmlEvent::EndElement {..} => {
+                        par_name += par_args.as_str();
+                        return Ok(FnParam {par_name, par_type, par_desc, par_brief, par_refid: None});
+                    },
+                    XmlEvent::Characters(_s) => {
+                    },
+                    _ => {}
+                }
+            }
+            Err(e) => {
+                println!("Error:{}", e);
+                return Err(e);
+            }
+        }
+    }
+}
+
+// Read a structure from its XML file.
+fn read_structure_file(parser: &mut EventReader<BufReader<File>>,
+                       sinfo: &mut StructureInfo) -> Result<u32, xml::reader::Error>
+{
+    loop {
+        let er = parser.next();
+        match er {
+            Ok(e) => {
+                match &e {
+                    XmlEvent::StartElement {name, ..} => {
+//                        println!("STRUCT READ: start name: {}", name);
+                        match name.to_string().as_str() {
+                            "compounddef" => {
+                                sinfo.str_name = collect_text(parser);
+                            }
+                            "briefdescription" => {
+                                sinfo.str_brief = collect_text(parser);
+                            }
+                            "detaileddescription" => {
+                                sinfo.str_description = collect_text(parser);
+                            }
+                            "memberdef" => {
+                                match read_structure_member(parser) {
+                                    Ok(s) => sinfo.str_members.push(s),
+                                    Err(e) => return Err(e),
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    XmlEvent::EndElement {..} => {
+                    },
+                    XmlEvent::Characters(_s) => {
+                    },
+                    XmlEvent::EndDocument => return Ok(0),
+                    _ => {}
+                }
+            }
+            Err(e) => {
+                println!("Error:{}", e);
+                return Err(e);
+            }
+        }
+    }
 }
 
 
-// Read all the strcutre files we need for our functions
+// Read all the structure files we need for our functions
 fn read_structures_files(opt: &Opt,
                          structures: &HashMap<String, StructureInfo>,
                          filled_structures: &mut HashMap<String, StructureInfo>)
 {
     for (refid, s) in structures {
-        println!("need to read STRUCT {} refid:  {}", s.str_name, refid);
-
         let mut xml_file = String::new();
         match write!(xml_file, "{}/{}.xml", &opt.xml_dir, &refid) {
             Ok(_f) => {}
@@ -508,13 +544,51 @@ fn read_structures_files(opt: &Opt,
     }
 }
 
+fn TEST_print_function(f: &FunctionInfo,
+                       structures: &HashMap<String, StructureInfo>)
+{
+    println!("FUNCTION {} {} {}", f.fn_type, f.fn_name, f.fn_argstring);
+    for i in &f.fn_args {
+        match &i.par_refid {
+            Some(r) =>
+                println!("  PARAM: {} {} (refid={})", i.par_type, i.par_name, r),
+            None =>
+                println!("  PARAM: {} {}", i.par_type, i.par_name),
+        }
+    }
+    println!("BRIEF: {}", f.fn_brief);
+    println!("DETAIL: {}", f.fn_detail);
+
+
+    for fs in &f.fn_refids {
+        match structures.get(fs) {
+            Some(s) => {
+
+                println!("STRUCTURE: {}", s.str_name);
+                if s.str_brief != "" {
+                    println!("           {}", s.str_brief);
+                }
+                if s.str_description != "" {
+                    println!("           {}", s.str_description);
+                }
+                for m in &s.str_members {
+                    println!("   MEMB: {} {}", m.par_type, m.par_name);
+                }
+            }
+            None => {}
+        }
+    }
+
+    println!("----------------------");
+}
+
 fn print_man_pages(_opt: &Opt,
                    functions: &Vec<FunctionInfo>,
-                   _structures: &HashMap<String, StructureInfo>)
+                   structures: &HashMap<String, StructureInfo>)
 {
 // Just a test ATM
     for f in functions {
-        TEST_print_function(&f);
+        TEST_print_function(&f, &structures);
     }
 }
 
@@ -547,12 +621,12 @@ fn main() {
             // Read it all into structures
             read_file(&mut parser, &opt, &mut functions, &mut structures);
 
-            // Go through structures Map and read those files in
+            // Go through structures map and read those files in to et the full structure info
             let mut filled_structures = HashMap::<String, StructureInfo>::new();
             read_structures_files(&opt, &structures,
                                   &mut filled_structures);
 
-            // Then print man pages!
+            // Then print those man pages!
             print_man_pages(&opt, &functions, &filled_structures);
         }
         Err(e) => {

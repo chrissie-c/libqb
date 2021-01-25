@@ -57,10 +57,20 @@ qb_ipcc_shm_disconnect(struct qb_ipcc_connection *c)
 			if (kill(c->server_pid, 0) == -1 && errno == ESRCH) {
 				rb_destructor = qb_rb_force_close;
 			} else {
-				usleep(10000); /* 1/100 of a second */
+				struct timespec ts = {0, 10*QB_TIME_NS_IN_MSEC};
+				struct timespec ts_left = {0, 0};
+				nanosleep(&ts, &ts_left);
 			}
 		}
 	}
+	/*
+	 * On FreeBSD we don't have a server PID so tidy up anyway. The
+	 * server traps SIGBUS when cleaning up so will cope fine.
+	 */
+	if (!c->is_connected && !c->server_pid) {
+		rb_destructor = qb_rb_force_close;
+	}
+
 	if (rb_destructor == qb_rb_force_close) {
 		qb_util_log(LOG_DEBUG,
 			    "FORCE closing server sockets\n");

@@ -1,25 +1,30 @@
 pipeline {
-    agent any
+    agent none
 
     stages {
-        stage('Build') {
+        stage('Build Debian') {
+	       agent {
+	       	     label "debian"
+	       }
             steps {
 		echo 'Building..'
                 sh 'sh autogen.sh'
 		sh './configure'
 		sh 'make'
-            }
-        }
-        stage('Test') {
-            steps {
-                echo 'Testing..'
 		sh 'make check'
-		archiveArtifacts artifacts: 'tests/test-suite.log', fingerprint: true
+		sh 'make distcheck'
             }
         }
-        stage('Deploy') {
+        stage('Build Fedora') {
+	       agent {
+	       	     label "fedora"
+	       }
             steps {
-                echo 'Deploying....'
+		echo 'Building..'
+                sh 'sh autogen.sh'
+		sh './configure'
+		sh 'make'
+		sh 'make check'
 		sh 'make distcheck'
             }
         }

@@ -14,6 +14,7 @@ pipeline {
             steps {
                 echo 'Testing..'
 		sh 'make check'
+		archiveArtifacts artifacts: 'tests/test-suite.log', fingerprint: true
             }
         }
         stage('Deploy') {

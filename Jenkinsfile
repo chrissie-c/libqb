@@ -1,6 +1,6 @@
 #!/bin/bash
 
-base=`basename $(pwd)`
+base=$(basename $(pwd))
 CONFIG_OPTS=""
 
 # Make sure we build corosync with systemd so that pcs works

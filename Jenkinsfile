@@ -1,5 +1,8 @@
 @Library('CCtestLib') _
 
 pipeline {
-	 runpipes(project:"libqb", branch:"main")
+    agent none
+    stages {
+        runpipes(project:"libqb", branch:"main")
+    }
 }

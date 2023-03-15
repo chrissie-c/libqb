@@ -3,6 +3,8 @@
 pipeline {
     agent none
     stages {
-        runpipes(project:"libqb", branch:"main")
+       stage('general') {
+          runpipes(project:"libqb", branch:"main")
+	}
     }
 }

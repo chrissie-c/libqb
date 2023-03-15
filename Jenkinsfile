@@ -1,3 +1,5 @@
+@Library('CCtestLib') _
+
 pipeline {
     agent none
     stages {
@@ -15,13 +17,8 @@ pipeline {
                 stages {
                     stage('Build & Test') {
                         steps {
-                            echo "Do Build and Test for ${PLATFORM}"
-			    sh 'sh autogen.sh'
-                            sh './configure'
-                            sh 'make'
-                            sh 'make check'
-                            sh 'make distcheck'
-                        }
+			    runstuff(project:"CCTest", branch:"main")
+			}
                     }
                 }
                 post {
